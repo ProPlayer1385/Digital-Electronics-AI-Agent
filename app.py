@@ -135,23 +135,22 @@ def speak_text_fast(text, speed=1.25):
         st.error(f"Audio playback error: {e}")
 
 # ----------------------------------------------------
-# 4. Speech-to-Text Microphone Function
+# 4. Browser-Based Speech-to-Text
 # ----------------------------------------------------
-def listen_from_mic():
-    r = sr.Recognizer()
-    with sr.Microphone() as source:
-        st.info("🎙️ Listening... Speak your prompt clearly.")
-        r.adjust_for_ambient_noise(source, duration=0.5)
-        try:
-            audio = r.listen(source, timeout=6)
-            text = r.recognize_google(audio)
-            return text
-        except sr.UnknownValueError:
-            st.warning("Could not understand audio. Try speaking again or type below.")
-            return None
-        except Exception as e:
-            st.error(f"Microphone error: {e}")
-            return None
+def transcribe_audio(audio_file):
+    """Transcribe browser-recorded audio without PyAudio."""
+    recognizer = sr.Recognizer()
+    try:
+        with sr.AudioFile(audio_file) as source:
+            audio = recognizer.record(source)
+        return recognizer.recognize_google(audio)
+    except sr.UnknownValueError:
+        st.warning("Could not understand the recording. Please try again or type your question.")
+    except sr.RequestError as e:
+        st.error(f"Speech recognition service error: {e}")
+    except Exception as e:
+        st.error(f"Audio processing error: {e}")
+    return None
 
 # ----------------------------------------------------
 # 5. Main Chat & Processing
@@ -164,21 +163,29 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# Voice Input Button
-if st.button("🎤 Voice Input"):
-    spoken_text = listen_from_mic()
-    if spoken_text:
-        st.session_state.prompt_input = spoken_text
+# Browser microphone input. The visitor records audio in their own browser,
+# so Streamlit Cloud does not need PyAudio or access to a server microphone.
+st.markdown("#### 🎤 Voice Input")
+voice_recording = st.audio_input("Record your conversion question")
+
+voice_prompt = None
+if voice_recording is not None:
+    audio_bytes = voice_recording.getvalue()
+    audio_signature = hash(audio_bytes)
+    if st.session_state.get("last_audio_signature") != audio_signature:
+        with st.spinner("Transcribing your voice..."):
+            voice_prompt = transcribe_audio(BytesIO(audio_bytes))
+        st.session_state.last_audio_signature = audio_signature
+        if voice_prompt:
+            st.success(f"Heard: {voice_prompt}")
 
 # Text Input
 user_prompt = st.chat_input("Ask a conversion question (e.g. 'Convert 101101 to decimal')")
 
 # Pick up prompt from either Voice or Text
-active_prompt = user_prompt or st.session_state.get("prompt_input", None)
+active_prompt = user_prompt or voice_prompt
 
 if active_prompt:
-    st.session_state.prompt_input = None
-
     # Render User Query
     st.session_state.messages.append({"role": "user", "content": active_prompt})
     with st.chat_message("user"):
